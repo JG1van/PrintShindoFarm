@@ -1,7 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Shindo Farm 77 Print</string>
-    <!-- URL PRODUKSI DARI CPANEL -->
     <string name="web_app_url">https://shindo-farm-77.byethost32.com/Shindo_Farm_Stock_77_L10/public</string>
-    <string name="bluetooth_print_package">com.iyaltamizh.bluetoothprint</string>
-    <string name="bluetooth_print_class">com.iyaltamizh.bluetoothprint.Print</string>
 </resources>

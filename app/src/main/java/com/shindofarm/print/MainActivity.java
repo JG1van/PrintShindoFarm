@@ -1,13 +1,14 @@
 package com.shindofarm.print;
 
 import android.annotation.SuppressLint;
-import android.content.ComponentName;
+import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
@@ -21,146 +22,40 @@ import androidx.appcompat.app.AppCompatActivity;
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "ShindoFarmPrint";
-    private WebView webView;
-    private String webAppUrl;
-    private String btPrintPackage;
-    private String btPrintClass;
+    private static final String BT_PRINT_PACKAGE = "com.iyaltamizh.bluetoothprint";
 
-    @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
+    private WebView webView;
+
+    @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Load config dari strings.xml
-        webAppUrl = getString(R.string.web_app_url);
-        btPrintPackage = getString(R.string.bluetooth_print_package);
-        btPrintClass = getString(R.string.bluetooth_print_class);
+        webView = findViewById(R.id.webview);
 
-        webView = findViewById(R.id.webView);
-        setupWebView();
-
-        // Load URL
-        webView.loadUrl(webAppUrl);
-    }
-
-    private void setupWebView() {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        settings.setDatabaseEnabled(true);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
+        settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
-        settings.setDisplayZoomControls(false);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-        // Enable cookies untuk session Laravel
-        CookieManager.getInstance().setAcceptCookie(true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
-        }
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        cookieManager.setAcceptThirdPartyCookies(webView, true);
 
-        // Inject JavascriptInterface untuk print
-        webView.addJavascriptInterface(new PrintBridge(), "AndroidPrint");
-
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                // Keep navigation inside WebView
-                if (url.startsWith("http")) {
-                    view.loadUrl(url);
-                    return true;
-                }
-                return super.shouldOverrideUrlLoading(view, url);
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                // Inject print function ke halaman web setelah load selesai
-                injectPrintFunction();
-            }
-
-            @Override
-            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                super.onReceivedError(view, errorCode, description, failingUrl);
-                Log.e(TAG, "WebView error: " + description);
-            }
-        });
-
+        webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient());
-    }
 
-    private void injectPrintFunction() {
-        // Inject JS yang akan dipanggil dari web: window.AndroidPrint.printNota(htmlContent)
-        String js = "javascript:(function() {" +
-            "if (window.AndroidPrint) { return; }" +
-            "window.AndroidPrint = { " +
-            "  printNota: function(content) { " +
-            "    if (typeof AndroidPrint !== 'undefined' && AndroidPrint.cetakNota) { " +
-            "      AndroidPrint.cetakNota(content); " +
-            "    } " +
-            "  }" +
-            "};" +
-            "})()";
-        webView.evaluateJavascript(js, null);
-    }
+        // Jembatan JavaScript <-> Android untuk fitur print
+        webView.addJavascriptInterface(new AndroidPrintBridge(this), "AndroidPrint");
 
-    // Bridge class yang dipanggil dari JavaScript
-    public class PrintBridge {
-        @JavascriptInterface
-        public void cetakNota(String content) {
-            Log.d(TAG, "cetakNota dipanggil dari web");
-            runOnUiThread(() -> {
-                if (isBluetoothPrintInstalled()) {
-                    sendPrintIntent(content);
-                } else {
-                    showInstallDialog();
-                }
-            });
-        }
-    }
-
-    private boolean isBluetoothPrintInstalled() {
-        PackageManager pm = getPackageManager();
-        try {
-            pm.getPackageInfo(btPrintPackage, PackageManager.GET_ACTIVITIES);
-            return true;
-        } catch (PackageManager.NameNotFoundException e) {
-            return false;
-        }
-    }
-
-    private void sendPrintIntent(String content) {
-        try {
-            Intent intent = new Intent();
-            intent.setComponent(new ComponentName(btPrintPackage, btPrintClass));
-            intent.putExtra("content", content);
-            // Optional: MAC address printer untuk direct print (isi jika perlu)
-            // intent.putExtra("device_address", "0F:02:18:B0:53:AA");
-            startActivity(intent);
-        } catch (Exception e) {
-            Log.e(TAG, "Error kirim intent print", e);
-            runOnUiThread(() -> Toast.makeText(this, "Gagal cetak: " + e.getMessage(), Toast.LENGTH_LONG).show());
-        }
-    }
-
-    private void showInstallDialog() {
-        new android.app.AlertDialog.Builder(this)
-            .setTitle("Aplikasi Print Tidak Ditemukan")
-            .setMessage("Butuh aplikasi 'Bluetooth Print' oleh iyaltamizh untuk cetak ke printer thermal. Install dari Play Store?")
-            .setPositiveButton("Install", (dialog, which) -> {
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + btPrintPackage)));
-                } catch (android.content.ActivityNotFoundException e) {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=" + btPrintPackage)));
-                }
-            })
-            .setNegativeButton("Batal", null)
-            .show();
+        String url = getString(R.string.web_app_url);
+        webView.loadUrl(url);
     }
 
     @Override
@@ -169,6 +64,94 @@ public class MainActivity extends AppCompatActivity {
             webView.goBack();
         } else {
             super.onBackPressed();
+        }
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
+            webView.goBack();
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    /**
+     * Class jembatan yang dipanggil dari JavaScript di halaman web
+     * lewat: AndroidPrint.cetakNota(teksAtauHtml)
+     */
+    public static class AndroidPrintBridge {
+
+        private final Context context;
+
+        AndroidPrintBridge(Context context) {
+            this.context = context;
+        }
+
+        @JavascriptInterface
+        public void cetakNota(String content) {
+            Log.d(TAG, "cetakNota dipanggil, panjang konten: " + content.length());
+
+            if (!isBluetoothPrintInstalled()) {
+                showToast("Aplikasi Bluetooth Print belum terinstall, mengarahkan ke Play Store...");
+                openPlayStore();
+                return;
+            }
+
+            try {
+                sendToBluetoothPrint(content);
+            } catch (Exception e) {
+                Log.e(TAG, "Gagal mengirim ke Bluetooth Print", e);
+                showToast("Gagal mencetak: " + e.getMessage());
+            }
+        }
+
+        private boolean isBluetoothPrintInstalled() {
+            PackageManager pm = context.getPackageManager();
+            try {
+                pm.getPackageInfo(BT_PRINT_PACKAGE, PackageManager.GET_ACTIVITIES);
+                return true;
+            } catch (PackageManager.NameNotFoundException e) {
+                return false;
+            }
+        }
+
+        private void sendToBluetoothPrint(String content) {
+            // Kirim teks nota ke aplikasi Bluetooth Print via Intent SEND
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.setPackage(BT_PRINT_PACKAGE);
+            intent.putExtra(Intent.EXTRA_TEXT, content);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            try {
+                context.startActivity(intent);
+            } catch (ActivityNotFoundException e) {
+                Log.e(TAG, "Bluetooth Print tidak dapat dibuka", e);
+                showToast("Gagal membuka aplikasi Bluetooth Print");
+                openPlayStore();
+            }
+        }
+
+        private void openPlayStore() {
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("market://details?id=" + BT_PRINT_PACKAGE));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+            } catch (ActivityNotFoundException e) {
+                Intent intent = new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=" + BT_PRINT_PACKAGE));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+            }
+        }
+
+        private void showToast(final String message) {
+            if (context instanceof AppCompatActivity) {
+                ((AppCompatActivity) context).runOnUiThread(() ->
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show());
+            }
         }
     }
 }
